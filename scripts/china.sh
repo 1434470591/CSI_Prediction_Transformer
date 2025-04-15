@@ -1,16 +1,16 @@
-cd ..
+# cd ..
 
 useEmbedding=0
 for speed in 100 200 300
 do
-python -u run.py \
-    --model transformer \
+python -u main.py \
+    --model Transformer \
     --useEmbedding $useEmbedding \
     --EmbeddingType L1 \
     --EmbeddingResponse CFR \
     --method first \
     --axis 1 \
-    --lradj 'consine' \
+    --lradj 'cosine' \
     --train_epochs 256 \
     --learning_rate 1e-5 \
     --e_layers 2 \
