@@ -29,15 +29,12 @@ class Model(nn.Module):
                                                       configs.dropout)
         if self.useEmbedding == 1:
             if self.axis:
-                self.enc_embedding = DataEmbedding_position_Tc(configs.enc_in, configs.d_model, configs.embed, configs.freq,
-                                                        configs.dropout,configs.tcVec)
+                self.enc_embedding = DataEmbedding_position_Tc(configs.enc_in, configs.d_model, configs.dropout,configs.tcVec)
             else:
-                self.enc_embedding = DataEmbedding_position_Tc_KY(configs.enc_in, configs.d_model, configs.embed, configs.freq,
-                                                        configs.dropout,configs.subcarrier_num)
+                self.enc_embedding = DataEmbedding_position_Tc_KY(configs.enc_in, configs.d_model, configs.seq_len, configs.dropout,configs.subcarrier_num)
             # self.dec_embedding = DataEmbedding_position_Tc(configs.dec_in, configs.d_model, configs.embed, configs.freq,
             #                                           configs.dropout,configs.tcVec)
-            self.dec_embedding = DataEmbedding_onlypos(configs.dec_in, configs.d_model, configs.embed, configs.freq,
-                                                      configs.dropout)
+            self.dec_embedding = DataEmbedding_onlypos(configs.dec_in, configs.d_model, configs.embed, configs.freq, configs.dropout)
         
 
         # Encoder

@@ -14,7 +14,6 @@ from test1 import __calculate_delta_CFR_first__, __calculate_delta_CIR_first__, 
 from test1 import __calculate_delta_CFR_second__, __calculate_delta_CIR_second__, __calculate_deltas_efficient_second__, get_second_tcVec
 
 import os
-os.environ['CUDA_VISIBLE_DEVICE']='0'
 
 def main():
     parser = argparse.ArgumentParser(description='Autoformer & Transformer family for Time Series Forecasting')
@@ -39,7 +38,7 @@ def main():
     # data loader
     parser.add_argument('--root_path', type=str, default='./dataset/paperDataset/', help='root path of the data file')
     parser.add_argument('--data_path', type=str, default='IQ_CFR_SNR300.csv', help='data file')
-    parser.add_argument("--data", type=str, default='china', help='dataset type, options:[china, sjtu]mobile communication open dataset')
+    parser.add_argument("--data", type=str, default='china', help='dataset type, options:[china(mobile communication open dataset), sjtu(data services lab dataset)]')
     parser.add_argument('--groundtruth_path', type=str, default='UMA4Rx32Tx5Ms8RB30km.npy', help='data file')
     # parser.add_argument('--groundtruth_path', type=str, default='IQ_CFR_nonoise.csv', help='data file')
     parser.add_argument('--features', type=str, default='M',
@@ -66,6 +65,7 @@ def main():
     parser.add_argument("--Txth", type=int, default=1, help="Location of tx Tx")
     parser.add_argument("--Rxth", type=int, default=1, help="Location of tx Rx")
     parser.add_argument("--subcarrier_num", type=int, default=32, help="number of subcarriers")
+    parser.add_argument("--RB_num", type=int, default=8, help="number of Resource Block")
 
     # forecasting task
     parser.add_argument('--seq_len', type=int, default=32, help='input sequence length')
@@ -110,27 +110,28 @@ def main():
                         help='time features encoding, options:[timeF, fixed, learned]')
     parser.add_argument('--activation', type=str, default='gelu', help='activation')
     parser.add_argument('--output_attention', action='store_true', help='whether to output attention in ecoder')
-    parser.add_argument('--do_predict', action='store_true', help='whether to predict unseen future data')
+    parser.add_argument('--do_predict', action='store_true', default=True, help='whether to predict unseen future data')
 
     # optimization
     parser.add_argument('--batch_size', type=int, default=32, help='batch size of train input data')
     parser.add_argument('--num_workers', type=int, default=0, help='data loader num workers')
     parser.add_argument('--itr', type=int, default=1, help='experiments times')
     parser.add_argument('--train_epochs', type=int, default=128, help='train epochs')
-    parser.add_argument('--warmup_epochs', type=int, default=5, help='warm up epochs')
-    parser.add_argument('--patience', type=int, default=10, help='early stopping patience')
+    parser.add_argument('--warmup_epochs', type=int, default=3, help='warm up epochs')
+    parser.add_argument('--patience', type=int, default=4, help='early stopping patience')
     parser.add_argument('--delta', type=float, default=1e-6, help='')
     parser.add_argument('--learning_rate', type=float, default=0.000001, help='optimizer learning rate')
     parser.add_argument('--des', type=str, default='test', help='exp description')
     parser.add_argument('--loss', type=str, default='mse', help='loss function')
-    parser.add_argument('--lradj', type=str, default='consine', help='options=[consine, original]')
+    parser.add_argument('--lradj', type=str, default='consine', help='options=[cosine, original, setLR]')
     parser.add_argument('--use_amp', action='store_true', help='use automatic mixed precision training', default=False)
 
     # GPU
     parser.add_argument('--use_gpu', type=int, default=1, help='use gpu')
     parser.add_argument('--gpu', type=int, default=0, help='gpu number')
-    parser.add_argument('--use_multi_gpu', action='store_true', help='use multiple gpus', default=False)
-    parser.add_argument('--devices', type=str, default='0, 1', help='device ids of multi gpus')
+    parser.add_argument('--use_multi_gpu', type=int, default=0, help='use multiple gpus')
+    parser.add_argument('--devices', type=str, default='2, 3', help='device ids of multi gpus')
+    
     # Embedding
     parser.add_argument('--useEmbedding', type=int, default=0)
     parser.add_argument('--tcVec', type=int, nargs='+', default=[])
@@ -145,12 +146,14 @@ def main():
     speed = args.speed
 
     args.use_gpu = True if torch.cuda.is_available() and args.use_gpu else False
+    
     fix_seed = args.seed
     random.seed(fix_seed)
     torch.manual_seed(fix_seed)# CPU
     np.random.seed(fix_seed)
+    torch.cuda.manual_seed(fix_seed)
     torch.cuda.manual_seed_all(fix_seed)# GPU
-
+    os.environ["PYTHONHASHSEED"] = str(fix_seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
@@ -167,7 +170,7 @@ def main():
     if args.data == 'sjtu':
         args.root_path = './dataset/'
         args.data_path = f"IQ_CFR_SNR{args.SNR}.csv"
-        args.batch_size = 32
+        args.batch_size = 64
         args.subcarrier_num = 32 * 2 if args.enhancement == 1 else 32
         # Embedding
         if args.useEmbedding and args.axis:
@@ -177,8 +180,8 @@ def main():
                 args.tcVec =(__calculate_deltas_efficient_second__(CFR_vector, EmbeddingType=args.EmbeddingType, threshold=args.threshold) + __calculate_deltas_efficient_second__(CIR_vector, EmbeddingType=args.EmbeddingType, threshold=args.threshold)) / 2 if args.EmbeddingResponse == 'MIX' else __calculate_deltas_efficient_second__(Y_vector=CFR_vector if args.EmbeddingResponse == 'CFR' else CIR_vector, EmbeddingType=args.EmbeddingType, threshold=args.threshold) 
             elif args.method == 'first':
                 # args.threshold = 0.07
-                CFR_vector_L1, CFR_vector_L2 = __calculate_delta_CFR_first__(path="./dataset/h_CFR_final_SNR{}.mat".format(SNR), axis=args.axis)
-                CIR_vector_L1, CIR_vector_L2 = __calculate_delta_CIR_first__(path="./dataset/h_CFR_final_SNR{}.mat".format(SNR), axis=args.axis)
+                CFR_vector_L1, CFR_vector_L2 = __calculate_delta_CFR_first__(path="./dataset/paperDataset/New/data_with_noise/h_CFR_final_SNR{}.mat".format(SNR), axis=args.axis)
+                CIR_vector_L1, CIR_vector_L2 = __calculate_delta_CIR_first__(path="./dataset/paperDataset/New/data_with_noise/h_CFR_final_SNR{}.mat".format(SNR), axis=args.axis)
                 if args.EmbeddingResponse == 'MIX' :
                     L1vector, L2vector =(__calculate_deltas_efficient_first__(CFR_vector_L1, args.threshold) + __calculate_deltas_efficient_first__(CIR_vector_L1, args.threshold)) / 2, (__calculate_deltas_efficient_first__(CFR_vector_L2, args.threshold) + __calculate_deltas_efficient_first__(CIR_vector_L2, args.threshold)) / 2 
                 else :
@@ -188,9 +191,8 @@ def main():
     elif args.data == 'china': 
         args.root_path = './dataset/china/'
         args.data_path = f"UMA4Rx32Tx5Ms8RB{args.speed}km.npy"
-        args.batch_size = 512
+        args.batch_size = 1024
         args.subcarrier_num = args.RB_num
-
         if args.scenario == 'SISO':
             # Embedding
             if args.useEmbedding and args.axis:
@@ -204,12 +206,11 @@ def main():
 
     print('Args in experiment:')
     if args.is_training:
-        args.groundtruth_path = args.data_path
         # Namespace
         print(args)
         for ii in range(args.itr):
             # setting record of experiments
-            setting = '{}_{}_{}_ft{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_dl{}_df{}_fc{}_eb{}_dt{}_{}_{}_{}_{}_{}_{}_{}_{}_{}_seed{}'.format(
+            setting = '{}_{}_{}_ft{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_dl{}_df{}_fc{}_eb{}_dt{}_{}_{}_{}_{}_{}_{}_{}_{}_{}_{}_seed{}'.format(
                 args.task_id,
                 args.model,
                 args.data,
@@ -227,6 +228,7 @@ def main():
                 args.distil,
                 args.des,
                 ii,
+                args.useEmbedding,
                 args.EmbeddingType, 
                 args.EmbeddingResponse, 
                 args.method, 
@@ -234,27 +236,23 @@ def main():
                 speed,
                 SNR,
                 args.enhancement,
-                fix_seed)
+                fix_seed
+                )
             
             exp = Exp_Main(args)  # set experiments
             print('>>>>>>>start training : {}>>>>>>>>>>>>>>>>>>>>>>>>>>'.format(setting))
             exp.train(setting)
 
             print('>>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
-            exp.test(setting, load=True)
-
-            if args.do_predict:
-                print('>>>>>>>predicting : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
-                exp.predict(setting)
+            exp.test(setting, load=0)
 
             torch.cuda.empty_cache()
     else:
-        args.groundtruth_path = args.data_path
         # Namespace
         print(args)
         for ii in range(args.itr):
             # setting record of experiments
-            setting = '{}_{}_{}_ft{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_dl{}_df{}_fc{}_eb{}_dt{}_{}_{}_{}_{}_{}_{}_{}_{}_{}_seed{}'.format(
+            setting = '{}_{}_{}_ft{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_dl{}_df{}_fc{}_eb{}_dt{}_{}_{}_{}_{}_{}_{}_{}_{}_{}_{}_seed{}'.format(
                 args.task_id,
                 args.model,
                 args.data,
@@ -272,6 +270,7 @@ def main():
                 args.distil,
                 args.des,
                 ii,
+                args.useEmbedding,
                 args.EmbeddingType, 
                 args.EmbeddingResponse, 
                 args.method, 
@@ -279,15 +278,17 @@ def main():
                 speed,
                 SNR,
                 args.enhancement,
-                fix_seed)
+                fix_seed
+                )
 
             exp = Exp_Main(args)  # set experiments
 
             print('>>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
-            exp.test(setting, True)
+            exp.test(setting, load=1)
+
             if args.do_predict:
                 print('>>>>>>>predicting : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
-                exp.predict(setting, True)
+                exp.predict(setting)
                 
             torch.cuda.empty_cache()
 

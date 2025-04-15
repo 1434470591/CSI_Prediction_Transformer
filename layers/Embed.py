@@ -232,8 +232,8 @@ class TcEmbedding(nn.Module):
         # return self.tokenConv(tc_embed.permute(0, 2, 1)).transpose(1, 2)
 
 class DataEmbedding_position_Tc(nn.Module):
-    def __init__(self, c_in, d_model, embed_type='fixed', freq='h', dropout=0.1, tcVec=None):
-        super(DataEmbedding_position_Tc_KY, self).__init__()
+    def __init__(self, c_in, d_model, dropout=0.1, tcVec=None):
+        super(DataEmbedding_position_Tc, self).__init__()
         self.value_embedding = TokenEmbedding(c_in=c_in, d_model=d_model)
         self.position_embedding = PositionalEmbedding(d_model=d_model)
         self.dropout = nn.Dropout(p=dropout)
@@ -244,7 +244,6 @@ class DataEmbedding_position_Tc(nn.Module):
         value_embed = self.value_embedding(x)
         position_embed = self.position_embedding(x)
 
-
         if not isinstance(self.tcVec, torch.Tensor):
             self.tcVec = torch.tensor(self.tcVec, dtype=torch.long, device=x.device)
         x_mark = x_mark.long()
@@ -254,12 +253,12 @@ class DataEmbedding_position_Tc(nn.Module):
         return self.dropout(x)
 
 class DataEmbedding_position_Tc_KY(nn.Module):
-    def __init__(self, c_in, d_model, embed_type='fixed', freq='h', dropout=0.1, subcarrier_num=32):
+    def __init__(self, c_in, d_model, seq_len, dropout=0.1, subcarrier_num=None):
         super(DataEmbedding_position_Tc_KY, self).__init__()
         self.value_embedding = TokenEmbedding(c_in=c_in, d_model=d_model)
         self.position_embedding = PositionalEmbedding(d_model=d_model)
         self.dropout = nn.Dropout(p=dropout)
-        self.tc_embedding = TcEmbedding(max_len=subcarrier_num, d_model=d_model)
+        self.tc_embedding = TcEmbedding(max_len=subcarrier_num, d_model=seq_len)
 
     def forward(self, x, x_mark):
         value_embed = self.value_embedding(x)
@@ -268,8 +267,8 @@ class DataEmbedding_position_Tc_KY(nn.Module):
         tc_sequence = x_mark.long()
         if not isinstance(tc_sequence, torch.Tensor):
             tc_sequence = torch.tensor(tc_sequence, dtype=torch.long, device=x.device)
-        tc_embed = self.tc_embedding(tc_sequence)
-        tc_embed = torch.concat([tc_embed, tc_embed], dim=1).permute(0, 2, 1)
-
+        tc_embedding = self.tc_embedding(tc_sequence)
+        tc_embedding = torch.concat([tc_embedding, tc_embedding], dim=1).permute(0, 2, 1)
+        tc_embed = self.value_embedding(tc_embedding)
         x = value_embed + position_embed + tc_embed
         return self.dropout(x)

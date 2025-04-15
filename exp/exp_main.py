@@ -7,6 +7,7 @@ import warnings
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.distributed as dist
 from matplotlib import pyplot as plt
 from thop import profile
 from torch import optim
@@ -68,12 +69,12 @@ class Exp_Main(Exp_Basic):
         }
         a = self.args
         model = model_dict[self.args.model].Model(self.args).float()
-
+        
         if self.args.use_multi_gpu and self.args.use_gpu:
             model = nn.DataParallel(model, device_ids=self.args.device_ids)
-
+            # model = nn.parallel.DistributedDataParallel(model, device_ids = self.args.device_ids)
         total = sum([param.nelement() for param in model.parameters()])
-        print("Number of parameters: %.4fM" % (total / 1e6))
+        print("Number of parameters: %.4fM" % (total / 1024 ** 2))
 
         return model
 
@@ -158,6 +159,7 @@ class Exp_Main(Exp_Basic):
         visual_train_loss = []
         visual_vali_loss = []
         visual_test_loss = []
+
         path = os.path.join(self.args.checkpoints, setting)
         if not os.path.exists(path):
             os.makedirs(path)
@@ -251,7 +253,7 @@ class Exp_Main(Exp_Basic):
 
             print("Epoch: {0}, Steps: {1} | Train Loss: {2:.7f} Vali Loss: {3:.7f} Test Loss: {4:.7f}".format(
                     epoch + 1, train_steps, train_loss, vali_loss, test_loss))
-            early_stopping(vali_loss, self.model, path)
+            early_stopping(epoch, vali_loss, self.model, path)
             if early_stopping.early_stop == True:
                 print("Early stopping")
                 break
@@ -272,14 +274,19 @@ class Exp_Main(Exp_Basic):
 
         return self.model
 
-    def test(self, setting, load=False):
+    def test(self, setting, load=0):
         plt.cla()
         test_data, test_loader = self._get_data(flag="test")
         # gt_test_data, gt_test_loader = self._get_gt_data(flag="groundtruth_test")
         # load model
         if load:
             print("loading model")
-            self.model.load_state_dict(torch.load(os.path.join(self.args.checkpoints + setting + self.args.save_name)))
+            
+            best_model_path = self.args.checkpoints + setting + self.args.save_name
+            print(best_model_path)
+            best_checkpoint = torch.load(best_model_path, map_location=torch.device("cuda" if torch.cuda.is_available() else "cpu"), weights_only=False)
+
+            self.model.load_state_dict(best_checkpoint['model_state_dict'])
 
         flops = 0
         params = 0
@@ -368,13 +375,15 @@ class Exp_Main(Exp_Basic):
         print("test shape transform to :", preds.shape, trues.shape)
         
         # inverse
-        # preds = preds * self.args.data_std + self.args.data_mean
-        # trues = trues * self.args.data_std + self.args.data_mean
+        preds = preds * self.args.data_std + self.args.data_mean
+        trues = trues * self.args.data_std + self.args.data_mean
         
         # metrics
         mae, mse, rmse, mape, mspe, nmse, nmse_db, SGCS = metric(preds[:, :, :64], trues[:, :, :64])
+        # flops = flops / (len(test_loader) * self.args.batch_size)
         flops = flops / (len(test_loader) * self.args.batch_size)
         params = params / (len(test_loader))
+        TOPS = flops / (5e-3 * 1000 ** 4)
         # log
         print(f"nmse{nmse}, nmsedb{nmse_db}, SGCS: {SGCS}, FLOPs: {flops / 1000 ** 3}G, Params: {params / 1000 ** 2}M")
         # result save npy
@@ -392,9 +401,10 @@ class Exp_Main(Exp_Basic):
         f.write("\n")
         f.write("\n")
         f.close()
-        # csvs
-        row_data = [[self.args.model, self.args.useEmbedding, self.args.method, self.args.EmbeddingResponse, self.args.EmbeddingType, self.args.threshold, round(mse, 6), round(nmse, 6), round(nmse_db, 6), round(SGCS, 6), round(flops / 1000**2, 4), round(params / 1000**1, 4),]]
-        with open(f"./output_{self.args.scenario}.csv", mode="a", newline="", encoding="utf-8") as file:
+
+        # csv
+        row_data = [[self.args.model, self.args.useEmbedding, f'axis: {self.args.axis}', self.args.method, self.args.EmbeddingResponse, self.args.EmbeddingType, self.args.threshold, round(mse, 6), round(nmse, 6), round(nmse_db, 6), round(SGCS, 6), f'flops:{round(flops / 1000**2, 4)}M', f'params:{round(params / 1024**2, 4)}M', f'TOPS:{round(TOPS, 8)}']]
+        with open(f"./output_{self.args.data}.csv", mode="a", newline="", encoding="utf-8") as file:
             writer = csv.writer(file)
             writer.writerows(row_data)
         
@@ -436,57 +446,64 @@ class Exp_Main(Exp_Basic):
         return 
     def predict(self, setting, load=False):
         pred_data, pred_loader = self._get_data(flag="pred")
-        gt_pred_data, gt_pred_loader = self._get_gt_data(flag="pred")
 
         if load:
-            path = os.path.join(self.args.checkpoints, setting)
-            best_model_path = path + self.args.save_name
-            self.model.load_state_dict(torch.load(best_model_path))
-
-        preds = []
+            print('load model')
+            self.model.load_state_dict(torch.load(os.path.join(self.args.checkpoints + setting + self.args.save_name), map_location='cuda:0'))
 
         self.model.eval()
+
+        preds = []
+        trues = []
+        inputx = []
+        flops = params = 0
+        batch_x, batch_y, batch_x_mark, batch_y_mark = next(iter(pred_loader))
         with torch.no_grad():
-            for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(pred_loader):
-                batch_x = batch_x.float().to(self.device)
-                batch_x_mark = batch_x_mark.float().to(self.device)
+            batch_x = batch_x.float().to(self.device)
+            batch_x_mark = batch_x_mark.float().to(self.device)
+            # decoder input
+            dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len :, :]).float()
+            dec_inp = (torch.cat([batch_y[:, : self.args.label_len, :], dec_inp], dim=1).float().to(self.device))
+            # encoder - decoder
+            inference_start = time.time()
 
-                for j, (x, y, x_mark, y_mark) in enumerate(gt_pred_loader):
-                    if j == i:
-                        batch_y = y.float().to(self.device)
-                        batch_y_mark = y_mark.float().to(self.device)
-                        break
-
-                # decoder input
-                dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len :, :]).float()
-                dec_inp = (torch.cat([batch_y[:, : self.args.label_len, :], dec_inp], dim=1).float().to(self.device))
-                # encoder - decoder
-                if self.args.use_amp:
-                    with torch.cuda.amp.autocast():
-                        if self.args.model in non_transformer:
-                            outputs = self.model(batch_x)
-                        else:
-                            outputs = (
-                                self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
-                                if self.args.output_attention
-                                else self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
-                            )
-                else:
+            if self.args.use_amp:
+                with torch.cuda.amp.autocast():
                     if self.args.model in non_transformer:
                         outputs = self.model(batch_x)
+                        inference_time = time.time() - inference_start
+                        flops, params = profile(self.model, inputs=(batch_x,))
                     else:
-                        outputs = (
-                            self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
-                            if self.args.output_attention
-                            else self.model(
-                                batch_x, batch_x_mark, dec_inp, batch_y_mark
-                            )
-                        )
-                pred = outputs.detach().cpu().numpy()  # .squeeze()
-                preds.append(pred)
+                        outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]if self.args.output_attention else \
+                            self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                        inference_time = time.time() - inference_start
+                        
+                        flops, params = profile(self.model,inputs=(batch_x,batch_x_mark,dec_inp,batch_y_mark,),)
+            else:
+                if self.args.model in non_transformer:
+                    outputs = self.model(batch_x)
+                    inference_time = time.time() - inference_start
+                    flops, params = profile(self.model, inputs=(batch_x,))
+                else:
+                    outputs = (self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]if self.args.output_attention
+                        else self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark))
+                    inference_time = time.time() - inference_start
+                    
+                    flops, params = profile(self.model,inputs=(batch_x, batch_x_mark, dec_inp, batch_y_mark,),)
+            
+            f_dim = -1 if self.args.features == "MS" else 0
 
-        preds = np.array(preds)
-        preds = preds.reshape(-1, preds.shape[-2], preds.shape[-1])
+            batch_y = batch_y[:, -self.args.pred_len :, f_dim:].to(self.device)
+
+            outputs = outputs.detach().cpu().numpy()
+            batch_y = batch_y.detach().cpu().numpy()
+
+            pred = outputs  # outputs.detach().cpu().numpy()  # .squeeze()
+            true = batch_y  # batch_y.detach().cpu().numpy()  # .squeeze()
+        
+        print(batch_x.shape)
+        TOPS = (flops / 5e-3 )/ 1e12
+        print(flops, params, inference_time, TOPS)
 
         # result save
         folder_path = "./results/" + setting + "/"

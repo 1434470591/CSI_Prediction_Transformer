@@ -52,7 +52,7 @@ def adjust_learning_rate2(optimizer, step, warmup_steps, args):
             lr_adjust = {step: (args.d_model ** -0.5) * min(step ** -0.5, step * (warmup_steps ** -1.5))}
         elif args.lradj == 'setLR':
             lr_adjust = {step: args.learning_rate * (warmup_steps ** 0.5) * (args.d_model ** 0.5) * (args.d_model ** -0.5) * min(step ** -0.5, step * (warmup_steps ** -1.5))}
-        elif args.lradj == 'consine':
+        elif args.lradj == 'cosine':
             lr_adjust = {step: args.learning_rate / 2 * (1 + math.cos(step / (args.train_epochs * (warmup_steps / args.warmup_epochs) * math.pi)))}
         
     if step in lr_adjust.keys():
@@ -71,11 +71,11 @@ class EarlyStopping:
         self.val_loss_min = np.inf
         self.delta = delta
 
-    def __call__(self, val_loss, model, path):
+    def __call__(self, epoch, val_loss, model, path):
         score = -val_loss
         if self.best_score is None:
             self.best_score = score
-            self.save_checkpoint(val_loss, model, path)
+            self.save_checkpoint(epoch, val_loss, model, path)
         elif score < self.best_score + self.delta:
             self.counter += 1
             print(f'EarlyStopping counter: {self.counter} out of {self.patience}')
@@ -83,13 +83,19 @@ class EarlyStopping:
                 self.early_stop = True
         else:
             self.best_score = score
-            self.save_checkpoint(val_loss, model, path)
+            self.save_checkpoint(epoch, val_loss, model, path)
             self.counter = 0
 
-    def save_checkpoint(self, val_loss, model, path):
+    def save_checkpoint(self, epoch, val_loss, model, path):
         if self.verbose:
             print(f'Validation loss decreased ({self.val_loss_min:.8f} --> {val_loss:.8f}).  Saving model ...')
-        torch.save(model.state_dict(), path + '/checkpoint.pth')
+        checkpoits = {
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'loss': val_loss,
+            }
+    
+        torch.save(checkpoits, path + '/checkpoint.pth')
         self.val_loss_min = val_loss
 
 

@@ -5,10 +5,10 @@ import time
 
 # 定义参数组合
 SPEED = [
-    30,
+    # 30,
     # 60,
-    # 120,
-    # 'x',
+    120,
+    'x',
 ]
 length = [
     {'seq_len': 5, 'pred_len': 1, 'slid_step': 1},
@@ -17,11 +17,11 @@ length = [
 
 ]
 combinations = [
-    # {"useEmbedding": 0, "EmbeddingType": 'None', "EmbeddingResponse": "None", "model": "Transformer", "lradj": "consine", "train_epochs": 256, "learning_rate": 1e-5, "e_layers": 2, "d_layers": 1,},
-    # {"useEmbedding": 1, "EmbeddingType": "L1", "EmbeddingResponse": "CFR", "model": "Transformer", "lradj": "consine", "train_epochs": 256, "learning_rate": 1e-5, "e_layers": 2, "d_layers": 1,},
+    {"useEmbedding": 0, "EmbeddingType": 'None', "EmbeddingResponse": "None", "model": "Transformer", "lradj": "cosine", "train_epochs": 256, "learning_rate": 1e-5, "e_layers": 2, "d_layers": 1,},
+    {"useEmbedding": 1, "EmbeddingType": "L1", "EmbeddingResponse": "CFR", "model": "Transformer", "lradj": "cosine", "train_epochs": 256, "learning_rate": 1e-5, "e_layers": 2, "d_layers": 1,},
     
-    # {"useEmbedding": 0, "EmbeddingType": 'None', "EmbeddingResponse": "None", "model": "Informer", "lradj": "consine", "train_epochs": 256, "learning_rate": 1e-5, "e_layers": 2, "d_layers": 1,},
-    {"useEmbedding": 1, "EmbeddingType": "L1", "EmbeddingResponse": "CFR", "model": "Informer", "lradj": "consine", "train_epochs": 256, "learning_rate": 1e-5, "e_layers": 2, "d_layers": 1,},
+    {"useEmbedding": 0, "EmbeddingType": 'None', "EmbeddingResponse": "None", "model": "Informer", "lradj": "cosine", "train_epochs": 256, "learning_rate": 1e-5, "e_layers": 2, "d_layers": 1,},
+    {"useEmbedding": 1, "EmbeddingType": "L1", "EmbeddingResponse": "CFR", "model": "Informer", "lradj": "cosine", "train_epochs": 256, "learning_rate": 1e-5, "e_layers": 2, "d_layers": 1,},
 ]
 
 # 定义种子列表ç
@@ -33,18 +33,20 @@ seed_list = [
 total_start_time = time.time()
 
 # 迭代并执行每个种子
-for speed in SPEED:
-    for seed in seed_list:
-        for len in length:
-            row_data = [[datetime.datetime.now().strftime('%Y-%m-%d  *%H:%M:%S'), f"observation windows:{len['seq_len']}", f"prediction windows:{len['pred_len']}", f"speed:{speed}", seed, ]]
+for seed in seed_list:
+    for len in length:
+        for speed in SPEED:
+            row_data = [[], [datetime.datetime.now().strftime('%Y-%m-%d  *%H:%M:%S'), f"observation windows:{len['seq_len']}", f"prediction windows:{len['pred_len']}", f"speed:{speed}", seed, ]]
             with open("./output_china.csv", mode="a", newline="", encoding="utf-8") as file:
                 writer = csv.writer(file)
                 writer.writerows(row_data)
             # 迭代并执行每个参数组合
             for combo in combinations:
+                if combo['model'] == 'Transformer' and speed == 120 :
+                    continue
                 for axis in [
                     0,
-                    # 1,
+                    1,
                     ]:
                     if combo['useEmbedding'] == 0 and axis != 0:
                         continue
@@ -56,15 +58,15 @@ for speed in SPEED:
                             continue
                         for EmbeddingResponse in [
                             'CFR', 
-                            # 'CIR', 
-                            # 'MIX',
+                            'CIR', 
+                            'MIX',
                             ]:
                             if combo['useEmbedding'] == 0 and EmbeddingResponse != 'CFR':
                                     continue
                             for EmbeddingType in [
                                 'L1', 
-                                # 'L2', 
-                                # 'L3',
+                                'L2', 
+                                'L3',
                                 ]:
                                 if combo['useEmbedding'] == 0 and EmbeddingType != 'L1':
                                     continue
@@ -87,8 +89,12 @@ for speed in SPEED:
                                     "--label_len",str(len["seq_len"]),
                                     "--pred_len",str(len["pred_len"]),
                                     "--slid_step",str(len["slid_step"]),
-
                                     "--data",'china',
+                                    # single gpu
+                                    "--gpu", '3',
+                                    # multi gpu
+                                    # "--use_multi_gpu", '1',
+                                    # "--devices", '2, 3',
                                     '--SNR', 'None',
                                     '--speed', str(speed),
                                     "--seed",str(seed),  # 添加种子参数

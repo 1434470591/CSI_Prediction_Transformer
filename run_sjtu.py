@@ -10,24 +10,25 @@ ENHANCEMENT = [
 ]
 SNR = [
     100,
-    # 200,
-    # 300,
+    200,
+    300,
 ]
 length = [
-    {'seq_len': 5, 'pred_len': 1, 'slid_step': 1},
-#     {'seq_len': 5, 'pred_len': 3, 'slid_step': 1},
-#     {'seq_len': 5, 'pred_len': 5, 'slid_step': 1},
+    # {'seq_len': 5, 'pred_len': 1, 'slid_step': 1},
+    {'seq_len': 5, 'pred_len': 3, 'slid_step': 1},
+    {'seq_len': 5, 'pred_len': 5, 'slid_step': 1},
 ]
 
 combinations = [
-    # {"useEmbedding": 0, "EmbeddingType": 'None', "EmbeddingResponse": "None", "model": "Transformer", "lradj": "consine", "train_epochs": 256, "learning_rate": 1e-5, "e_layers": 2, "d_layers": 1,},
-    # {"useEmbedding": 1, "EmbeddingType": "L1", "EmbeddingResponse": "CFR", "model": "Transformer", "lradj": "consine", "train_epochs": 256, "learning_rate": 1e-5, "e_layers": 2, "d_layers": 1,},
+    {"useEmbedding": 0, "EmbeddingType": 'None', "EmbeddingResponse": "None", "model": "Transformer", "lradj": "cosine", "train_epochs": 256, "learning_rate": 1e-5, "e_layers": 2, "d_layers": 1,},
+    {"useEmbedding": 1, "EmbeddingType": "L1", "EmbeddingResponse": "CFR", "model": "Transformer", "lradj": "cosine", "train_epochs": 256, "learning_rate": 1e-5, "e_layers": 2, "d_layers": 1,},
     
-    # {"useEmbedding": 0, "EmbeddingType": 'None', "EmbeddingResponse": "None", "model": "Informer", "lradj": "consine", "train_epochs": 256, "learning_rate": 1e-5, "e_layers": 2, "d_layers": 1,},
-    {"useEmbedding": 1, "EmbeddingType": "L1", "EmbeddingResponse": "CFR", "model": "Informer", "lradj": "consine", "train_epochs": 256, "learning_rate": 1e-5, "e_layers": 2, "d_layers": 1,},
+    {"useEmbedding": 0, "EmbeddingType": 'None', "EmbeddingResponse": "None", "model": "Informer", "lradj": "cosine", "train_epochs": 256, "learning_rate": 1e-5, "e_layers": 2, "d_layers": 1,},
+    {"useEmbedding": 1, "EmbeddingType": "L1", "EmbeddingResponse": "CFR", "model": "Informer", "lradj": "cosine", "train_epochs": 256, "learning_rate": 1e-5, "e_layers": 2, "d_layers": 1,},
 ]
 
 # 定义种子列表
+
 seed_list = [
     2044,
     # 2030,
@@ -38,8 +39,10 @@ total_start_time = time.time()
 
 # 迭代并执行每个种子
 for seed in seed_list:
-    for snr in SNR:
-        for len in length:
+    for len in length:
+        for snr in SNR:
+            if len['pred_len'] == 3 and (snr == 100 or snr == 200) :
+                continue
             row_data = [[], [datetime.datetime.now().strftime("%Y-%m-%d  %H:%M:%S"),len["seq_len"],len["pred_len"],snr, seed], []]
             with open("./output_sjtu.csv", mode="a", newline="", encoding="utf-8") as file:
                 writer = csv.writer(file)
@@ -60,37 +63,41 @@ for seed in seed_list:
                             continue
                         for EmbeddingResponse in [
                             'CFR', 
-                            # 'CIR', 
-                            # 'MIX',
+                            'CIR', 
+                            'MIX',
                             ]:
                             if combo['useEmbedding'] == 0 and EmbeddingResponse != 'CFR':
                                     continue
                             for EmbeddingType in [
                                 'L1', 
-                                # 'L2', 
-                                # 'L3',
+                                'L2', 
+                                'L3',
                                 ]:
                                 if combo['useEmbedding'] == 0 and EmbeddingType != 'L1':
                                     continue
                                 # 构建命令行参数
                                 args = [
                                     "python", "main.py",
+                                    '--is_training', '1',
                                     "--model", combo["model"],
                                     '--useEmbedding', str(combo['useEmbedding']),
                                     '--EmbeddingType', EmbeddingType,
                                     '--EmbeddingResponse', EmbeddingResponse,
                                     '--method', method,
                                     '--axis', str(axis),
-                                    '--lradj', combo['lradj'],
+                                    '--lradj', 'setLR',
                                     "--train_epochs", str(combo["train_epochs"]),
-                                    "--learning_rate",str(combo["learning_rate"]),
+                                    # "--learning_rate",str(combo["learning_rate"]),
                                     "--e_layers",str(combo["e_layers"]),
                                     "--d_layers",str(combo["d_layers"]),
 
+                                    
                                     "--seq_len",str(len["seq_len"]),
+                                    "--label_len",str(len["seq_len"]),
                                     "--slid_step",str(len["slid_step"]),
                                     "--pred_len",str(len["pred_len"]),
                                     "--data", 'sjtu',
+                                    "--gpu", '1',
                                     "--SNR",str(snr),
                                     '--speed', 'None',
                                     "--seed",str(seed),  # 添加种子参数

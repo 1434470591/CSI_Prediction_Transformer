@@ -28,22 +28,18 @@ def data_provider(args, flag):
     else:
         data_set = Data(args=args, flag=flag).__load_data__()
 
-    if flag == "test" or "groundtruth_test":
+    if flag == "test" :
         shuffle_flag = False
         drop_last = True
         batch_size = args.batch_size
-        freq = args.freq
-    elif flag == "pred" or "groundtruth_pred":
+    elif flag == "pred" :
         shuffle_flag = False
         drop_last = False
         batch_size = 1
-        freq = args.detail_freq
-        Data = Dataset_Pred
     else:
         shuffle_flag = True
         drop_last = True
         batch_size = args.batch_size
-        freq = args.freq
 
     print(flag, len(data_set))
     data_loader = DataLoader(
